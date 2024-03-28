@@ -39,7 +39,7 @@ impl<T> RWReplace<T, T> for UnsafeSyncCell<T> {}
 
 pub trait RAppend<R: ?Sized, A> {
     fn read(&self) -> &R;
-    fn append(&mut self, data: A);
+    fn append(&self, data: A);
 }
 
 impl<C, T> RAppend<[T], T> for C
@@ -50,7 +50,7 @@ where
         self.read()
     }
 
-    fn append(&mut self, data: T) {
+    fn append(&self, data: T) {
         self.write().push(data);
     }
 }
