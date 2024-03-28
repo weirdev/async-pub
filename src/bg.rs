@@ -6,10 +6,18 @@ pub trait RW<R, W> {
 }
 
 pub struct UnsafeSyncCell<T> {
-    pub data: UnsafeCell<T>
+    pub data: UnsafeCell<T>,
 }
 
-unsafe impl Sync for UnsafeSyncCell<String> {}
+unsafe impl<T> Sync for UnsafeSyncCell<T> {}
+
+impl<T> UnsafeSyncCell<T> {
+    pub const fn new(data: T) -> UnsafeSyncCell<T> {
+        UnsafeSyncCell {
+            data: UnsafeCell::new(data),
+        }
+    }
+}
 
 impl<T> RW<T, T> for UnsafeSyncCell<T> {
     fn read(&self) -> &T {
@@ -17,7 +25,9 @@ impl<T> RW<T, T> for UnsafeSyncCell<T> {
     }
 
     fn write(&self, data: T) {
-        unsafe { *self.data.get() = data; }
+        unsafe {
+            *self.data.get() = data;
+        }
     }
 }
 
@@ -26,18 +36,24 @@ pub trait RAppend<R, A> {
     fn append(&mut self, data: A);
 }
 
-pub struct BGData<T, R, W> where T: RW<R, W> {
+pub struct BGData<T, R, W>
+where
+    T: RW<R, W>,
+{
     data: T,
     _r: std::marker::PhantomData<R>,
-    _w: std::marker::PhantomData<W>
+    _w: std::marker::PhantomData<W>,
 }
 
-impl<T, R, W> BGData<T, R, W> where T: RW<R, W> {
+impl<T, R, W> BGData<T, R, W>
+where
+    T: RW<R, W>,
+{
     pub const fn new(data: T) -> BGData<T, R, W> {
         BGData {
             data: data,
             _r: std::marker::PhantomData,
-            _w: std::marker::PhantomData
+            _w: std::marker::PhantomData,
         }
     }
 
