@@ -1,11 +1,10 @@
 mod bg;
 
-use bg::{BGData, UnsafeSyncCell};
+use bg::{RWReplace, UnsafeSyncCell, RW};
 
-static BGD: BGData<UnsafeSyncCell<String>, String, String> =
-    BGData::new(UnsafeSyncCell::new(String::new()));
+static BGD: UnsafeSyncCell<String> = UnsafeSyncCell::new(String::new());
 
 fn main() {
-    BGD.write("Hello, world!".to_string());
+    BGD.replace("Hello, world!".to_string());
     println!("{}", BGD.read());
 }

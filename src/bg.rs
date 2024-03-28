@@ -1,8 +1,14 @@
 use std::cell::UnsafeCell;
 
-pub trait RW<R, W> {
+pub trait RW<R: ?Sized, W: ?Sized> {
     fn read(&self) -> &R;
-    fn write(&self, data: W);
+    fn write(&self) -> &mut W;
+}
+
+pub trait RWReplace<R: ?Sized, W>: RW<R, W> {
+    fn replace(&self, data: W) {
+        let _ = std::mem::replace(self.write(), data);
+    }
 }
 
 pub struct UnsafeSyncCell<T> {
@@ -24,44 +30,27 @@ impl<T> RW<T, T> for UnsafeSyncCell<T> {
         unsafe { &*self.data.get() }
     }
 
-    fn write(&self, data: T) {
-        unsafe {
-            *self.data.get() = data;
-        }
+    fn write(&self) -> &mut T {
+        unsafe { &mut *self.data.get() }
     }
 }
 
-pub trait RAppend<R, A> {
+impl<T> RWReplace<T, T> for UnsafeSyncCell<T> {}
+
+pub trait RAppend<R: ?Sized, A> {
     fn read(&self) -> &R;
     fn append(&mut self, data: A);
 }
 
-pub struct BGData<T, R, W>
+impl<C, T> RAppend<[T], T> for C
 where
-    T: RW<R, W>,
+    C: RW<Vec<T>, Vec<T>>,
 {
-    data: T,
-    _r: std::marker::PhantomData<R>,
-    _w: std::marker::PhantomData<W>,
-}
-
-impl<T, R, W> BGData<T, R, W>
-where
-    T: RW<R, W>,
-{
-    pub const fn new(data: T) -> BGData<T, R, W> {
-        BGData {
-            data: data,
-            _r: std::marker::PhantomData,
-            _w: std::marker::PhantomData,
-        }
+    fn read(&self) -> &[T] {
+        self.read()
     }
 
-    pub fn read(&self) -> &R {
-        self.data.read()
-    }
-
-    pub fn write(&self, data: W) {
-        self.data.write(data);
+    fn append(&mut self, data: T) {
+        self.write().push(data);
     }
 }
