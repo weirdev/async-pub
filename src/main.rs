@@ -1,10 +1,6 @@
 mod bg;
-
-use bg::{RWReplace, UnsafeSyncCell, RW};
-
-static BGD: UnsafeSyncCell<String> = UnsafeSyncCell::new(String::new());
+mod test1;
 
 fn main() {
-    BGD.replace("Hello, world!".to_string());
-    println!("{}", BGD.read());
+    test1::main();
 }
