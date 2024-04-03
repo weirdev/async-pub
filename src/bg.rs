@@ -1,13 +1,26 @@
-use std::cell::UnsafeCell;
+use std::{
+    cell::UnsafeCell,
+    sync::{LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard},
+};
 
-pub trait RW<R: ?Sized, W: ?Sized> {
-    fn read(&self) -> &R;
-    fn write(&self) -> &mut W;
+pub trait Readable<'a, T> {
+    fn read(&'a self) -> &'a T;
 }
 
-pub trait RWReplace<R: ?Sized, W>: RW<R, W> {
-    fn replace(&self, data: W) {
-        let _ = std::mem::replace(self.write(), data);
+pub trait Writable<'a, T> {
+    fn write(&self) -> &'a mut T;
+}
+
+pub trait RW<'a, R, S: Readable<'a, R> + ?Sized, W, X: Writable<'a, W> + ?Sized + 'a> {
+    fn read(&'a self) -> S;
+    fn write(&'a self) -> X;
+}
+
+pub trait RWReplace<'a, R, S: Readable<'a, R> + ?Sized, W: 'a, X: Writable<'a, W> + 'a>:
+    RW<'a, R, S, W, X>
+{
+    fn replace(&'a self, data: W) {
+        let _ = std::mem::replace(self.write().write(), data);
     }
 }
 
@@ -25,32 +38,53 @@ impl<T> UnsafeSyncCell<T> {
     }
 }
 
-impl<T> RW<T, T> for UnsafeSyncCell<T> {
-    fn read(&self) -> &T {
-        unsafe { &*self.data.get() }
+impl<'a, T> Readable<'a, T> for &'a T {
+    fn read(&'a self) -> &'a T {
+        self
     }
+}
 
-    fn write(&self) -> &mut T {
+impl<'a, T> Writable<'a, T> for &'a UnsafeSyncCell<T> {
+    fn write(&self) -> &'a mut T {
         unsafe { &mut *self.data.get() }
     }
 }
 
-impl<T> RWReplace<T, T> for UnsafeSyncCell<T> {}
+impl<'a, T> RW<'a, T, &'a T, T, &'a UnsafeSyncCell<T>> for UnsafeSyncCell<T> {
+    fn read(&'a self) -> &'a T {
+        unsafe { &*self.data.get() }
+    }
 
-pub trait RAppend<R: ?Sized, A> {
+    fn write(&'a self) -> &'a UnsafeSyncCell<T> {
+        self
+    }
+}
+
+impl<'a, T> RWReplace<'a, T, &'a T, T, &'a UnsafeSyncCell<T>> for UnsafeSyncCell<T> {}
+
+pub trait RAppend<'a, R: ?Sized, A> {
     fn read(&self) -> &R;
-    fn append(&self, data: A);
+    fn append(&'a self, data: A);
 }
 
-impl<C, T> RAppend<[T], T> for C
-where
-    C: RW<Vec<T>, Vec<T>>,
-{
+impl<'a, T> RAppend<'a, [T], T> for UnsafeSyncCell<Vec<T>> {
     fn read(&self) -> &[T] {
-        self.read()
+        RW::read(self)
     }
 
-    fn append(&self, data: T) {
-        self.write().push(data);
+    fn append(&'a self, data: T) {
+        Writable::write(&RW::write(self)).push(data);
     }
 }
+
+// TODO: Maybe use evmap
+
+// impl <'a> RW<LockResult<RwLockReadGuard<'a, Vec<u8>>>, LockResult<RwLockWriteGuard<'a, Vec<u8>>>> for RwLock<Vec<u8>> {
+//     fn read(&self) -> &LockResult<RwLockReadGuard<'a, Vec<u8>>> {
+//         &self.read()
+//     }
+
+//     fn write(&self) -> &mut LockResult<RwLockWriteGuard<'a, Vec<u8>>> {
+//         &mut self.write()
+//     }
+// }
