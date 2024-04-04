@@ -4,19 +4,19 @@ use std::{
 };
 
 pub trait Readable<'a, T> {
-    fn read(&'a self) -> &'a T;
+    fn read(&self) -> &'a T;
 }
 
 pub trait Writable<'a, T> {
     fn write(&self) -> &'a mut T;
 }
 
-pub trait RW<'a, R, S: Readable<'a, R> + ?Sized, W, X: Writable<'a, W> + ?Sized + 'a> {
+pub trait RW<'a, R, S: Readable<'a, R> + ?Sized, W, X: Writable<'a, W> + ?Sized> {
     fn read(&'a self) -> S;
     fn write(&'a self) -> X;
 }
 
-pub trait RWReplace<'a, R, S: Readable<'a, R> + ?Sized, W: 'a, X: Writable<'a, W> + 'a>:
+pub trait RWReplace<'a, R, S: Readable<'a, R> + ?Sized, W: 'a, X: Writable<'a, W>>:
     RW<'a, R, S, W, X>
 {
     fn replace(&'a self, data: W) {
@@ -39,7 +39,7 @@ impl<T> UnsafeSyncCell<T> {
 }
 
 impl<'a, T> Readable<'a, T> for &'a T {
-    fn read(&'a self) -> &'a T {
+    fn read(&self) -> &'a T {
         self
     }
 }
@@ -78,13 +78,27 @@ impl<'a, T> RAppend<'a, [T], T> for UnsafeSyncCell<Vec<T>> {
 }
 
 // TODO: Maybe use evmap
+// Actually channels could be better std::sync::mpsc
 
-// impl <'a> RW<LockResult<RwLockReadGuard<'a, Vec<u8>>>, LockResult<RwLockWriteGuard<'a, Vec<u8>>>> for RwLock<Vec<u8>> {
-//     fn read(&self) -> &LockResult<RwLockReadGuard<'a, Vec<u8>>> {
-//         &self.read()
+// impl<'a> Readable<'a, Vec<u8>> for LockResult<RwLockReadGuard<'a, Vec<u8>>> {
+//     fn read(&'a self) -> &'a Vec<u8> {
+//         self.as_ref().unwrap()
+//     }
+// }
+
+// impl<'a> Writable<'a, Vec<u8>> for LockResult<RwLockWriteGuard<'a, Vec<u8>>> {
+//     fn write(&self) -> &'a mut Vec<u8> {
+//         let s  = self.as_ref().unwrap();
+//         &mut *s
+//     }
+// }
+
+// impl <'a> RW<'a, Vec<u8>, LockResult<RwLockReadGuard<'a, Vec<u8>>>, Vec<u8>, LockResult<RwLockWriteGuard<'a, Vec<u8>>>> for RwLock<Vec<u8>> {
+//     fn read(&self) -> LockResult<RwLockReadGuard<'a, Vec<u8>>> {
+//         self.read()
 //     }
 
-//     fn write(&self) -> &mut LockResult<RwLockWriteGuard<'a, Vec<u8>>> {
-//         &mut self.write()
+//     fn write(&self) -> LockResult<RwLockWriteGuard<'a, Vec<u8>>> {
+//         self.write()
 //     }
 // }
