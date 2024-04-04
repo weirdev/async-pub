@@ -1,9 +1,14 @@
 use crate::bg;
-use bg::{RWReplace, UnsafeSyncCell, RW};
+use bg::UnsafeSyncCell;
 
 static BGD: UnsafeSyncCell<String> = UnsafeSyncCell::new(String::new());
 
 pub fn main() {
-    BGD.replace("Hello, world!".to_string());
-    println!("{}", BGD.read());
+    unsafe {
+        let _ = std::mem::replace(
+            BGD.data.get().as_mut().unwrap(),
+            "Hello, world!".to_string(),
+        );
+        println!("{}", BGD.data.get().as_ref().unwrap());
+    }
 }

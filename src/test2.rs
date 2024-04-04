@@ -1,11 +1,13 @@
 use crate::bg;
-use bg::{RAppend, UnsafeSyncCell};
+use bg::UnsafeSyncCell;
 
 static BGD: UnsafeSyncCell<Vec<String>> = UnsafeSyncCell::new(Vec::new());
 
 pub fn main() {
-    BGD.append("Hello, world!".to_string());
-    println!("{}", BGD.read().join(", "));
-    BGD.append("Hello, again!".to_string());
-    println!("{}", BGD.read().join(", "));
+    unsafe {
+        BGD.data.get().as_mut().unwrap().push("Hello, world!".to_string());
+        println!("{}", BGD.data.get().as_mut().unwrap().join(", "));
+        BGD.data.get().as_mut().unwrap().push("Hello, again!".to_string());
+        println!("{}", BGD.data.get().as_mut().unwrap().join(", "));
+    }
 }
