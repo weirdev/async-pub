@@ -1,27 +1,37 @@
-use std::{
-    cell::UnsafeCell, ops::Deref, sync::{LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard}
-};
+use std::cell::UnsafeCell;
+use std::sync::mpsc::{channel, Receiver, SendError, Sender};
+use std::sync::RwLock;
 
-// pub trait Readable<'a, T> {
-//     fn read(&self) -> &'a T;
-// }
+pub struct CommonSender<T> {
+    tx: RwLock<Option<Sender<T>>>,
+}
 
-// pub trait Writable<'a, T> {
-//     fn write(&self) -> &'a mut T;
-// }
+unsafe impl<T> Sync for CommonSender<T> {}
 
-// pub trait RW<'a, R, S: Readable<'a, R> + ?Sized, W, X: Writable<'a, W> + ?Sized> {
-//     fn read(&'a self) -> S;
-//     fn write(&'a self) -> X;
-// }
+impl<T> CommonSender<T> {
+    pub const fn new() -> CommonSender<T> {
+        CommonSender { tx: RwLock::new(None) }
+    }
 
-// pub trait RWReplace<'a, R, S: Readable<'a, R> + ?Sized, W: 'a, X: Writable<'a, W>>:
-//     RW<'a, R, S, W, X>
-// {
-//     fn replace(&'a self, data: W) {
-//         let _ = std::mem::replace(self.write().write(), data);
-//     }
-// }
+    pub fn send(&self, data: T) -> Result<(), ()> {
+        let s = self.tx.read().unwrap().as_ref().map(|s| s.clone()).ok_or(())?;
+        s.send(data).map_err(|_| ())
+    }
+
+    pub fn set_new_channel(&self) -> Receiver<T> {
+        let (tx, rx) = channel::<T>();
+
+        // Must clone the sender to ensure the same sender not used by multiple threads
+        // The clone is dropped, but the original sender must stay alive
+        // to keep the channel open
+        unsafe {
+            let mut old_tx_opt = self.tx.write().unwrap();
+            let _ = std::mem::replace(&mut *old_tx_opt, Some(tx));
+        }
+
+        rx
+    }
+}
 
 pub struct UnsafeSyncCell<T> {
     pub data: UnsafeCell<T>,
@@ -36,70 +46,3 @@ impl<T> UnsafeSyncCell<T> {
         }
     }
 }
-
-// impl<'a, T> Readable<'a, T> for &'a T {
-//     fn read(&self) -> &'a T {
-//         self
-//     }
-// }
-
-// impl<'a, T> Writable<'a, T> for &'a UnsafeSyncCell<T> {
-//     fn write(&self) -> &'a mut T {
-//         unsafe { &mut *self.data.get() }
-//     }
-// }
-
-// impl<'a, T> RW<'a, T, &'a T, T, &'a UnsafeSyncCell<T>> for UnsafeSyncCell<T> {
-//     fn read(&'a self) -> &'a T {
-//         unsafe { &*self.data.get() }
-//     }
-
-//     fn write(&'a self) -> &'a UnsafeSyncCell<T> {
-//         self
-//     }
-// }
-
-// impl<'a, T> RWReplace<'a, T, &'a T, T, &'a UnsafeSyncCell<T>> for UnsafeSyncCell<T> {}
-
-// pub trait RAppend<'a, R: ?Sized, A> {
-//     fn read(&self) -> &R;
-//     fn append(&'a self, data: A);
-// }
-
-// impl<'a, T> RAppend<'a, [T], T> for UnsafeSyncCell<Vec<T>> {
-//     fn read(&self) -> &[T] {
-//         RW::read(self)
-//     }
-
-//     fn append(&'a self, data: T) {
-//         Writable::write(&RW::write(self)).push(data);
-//     }
-// }
-
-// // TODO: Maybe use evmap
-// // Actually channels could be better std::sync::mpsc
-
-
-
-// impl<'a> Readable<'a, Vec<u8>> for RwLockReadGuard<'a, Vec<u8>> {
-//     fn read(&self) -> &'a Vec<u8> {
-//         self.deref()
-//     }
-// }
-
-// impl<'a> Writable<'a, Vec<u8>> for LockResult<RwLockWriteGuard<'a, Vec<u8>>> {
-//     fn write(&self) -> &'a mut Vec<u8> {
-//         let s  = self.as_ref().unwrap();
-//         &mut *s
-//     }
-// }
-
-// impl <'a> RW<'a, Vec<u8>, LockResult<RwLockReadGuard<'a, Vec<u8>>>, Vec<u8>, LockResult<RwLockWriteGuard<'a, Vec<u8>>>> for RwLock<Vec<u8>> {
-//     fn read(&self) -> LockResult<RwLockReadGuard<'a, Vec<u8>>> {
-//         self.read()
-//     }
-
-//     fn write(&self) -> LockResult<RwLockWriteGuard<'a, Vec<u8>>> {
-//         self.write()
-//     }
-// }
