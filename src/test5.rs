@@ -24,6 +24,14 @@ fn sleep_random_millis(rng: &mut ThreadRng) {
 pub fn main() {
     let rx = BGD.set_new_channel();
 
+    let receiver = thread::spawn(move || {
+        // Because we keep a live sender at all times, iterating
+        // past the 10th element will block the program
+        for out in rx.iter().take(10) {
+            println!("{}", out);
+        }
+    });
+
     for i in 0..10 {
         thread::spawn(move || {
             let mut rng = rand::thread_rng();
@@ -31,10 +39,6 @@ pub fn main() {
             let _ = BGD.send(i);
         });
     }
-    
-    // Because we keep a live sender at all times, iterating
-    // past the 10th element will block the program
-    for out in rx.iter().take(10) {
-        println!("{}", out);
-    }
+
+    receiver.join().unwrap();
 }
