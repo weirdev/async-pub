@@ -1,5 +1,5 @@
 use std::cell::UnsafeCell;
-use std::sync::mpsc::{channel, Receiver, SendError, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::RwLock;
 
 pub struct CommonSender<T> {
@@ -24,10 +24,8 @@ impl<T> CommonSender<T> {
         // Must clone the sender to ensure the same sender not used by multiple threads
         // The clone is dropped, but the original sender must stay alive
         // to keep the channel open
-        unsafe {
-            let mut old_tx_opt = self.tx.write().unwrap();
-            let _ = std::mem::replace(&mut *old_tx_opt, Some(tx));
-        }
+        let mut old_tx_opt = self.tx.write().unwrap();
+        let _ = std::mem::replace(&mut *old_tx_opt, Some(tx));
 
         rx
     }

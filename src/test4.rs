@@ -1,5 +1,3 @@
-use std::sync::RwLock;
-
 use crate::bg::CommonSender;
 
 static BGD: CommonSender<u8> = CommonSender::new();
