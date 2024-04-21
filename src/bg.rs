@@ -1,93 +1,96 @@
 use std::cell::UnsafeCell;
 use std::mem::swap;
 // switch to tokio::sync::mpsc
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Sender};
 use std::sync::RwLock;
 use std::thread::JoinHandle;
 
-pub struct LogPublisherHandle<'a, T> {
-    thread_handle: Option<JoinHandle<()>>,
-    common_sender: &'a CommonSender<T>,
+use once_cell::sync::Lazy;
+
+pub struct Logger<T> {
+    // Lazy: Allows doing the complex (non const) initialization of the state
+    // RwLock: Allows multiple read threads to publish simultaneously and a single write thread to close the logger
+    // Option: Allows the state to be cleared when the logger is closed
+    state: Lazy<RwLock<Option<LoggerState<T>>>>,
 }
 
-pub fn initiate_logging<'a, T, F>(
-    common_sender: &'a CommonSender<T>,
-    mut publisher: F,
-) -> LogPublisherHandle<'a, T>
-where
-    F: FnMut(T) + Send + 'static,
-    T: Send + 'static,
-{
-    let rx = common_sender.set_new_channel();
+impl<T> Logger<T> {
+    pub const fn new<P>() -> Logger<T>
+    where
+        P: Publisher<T>,
+        T: Send + 'static,
+    {
+        Self {
+            state: Lazy::new(move || {
+                let (tx, rx) = channel::<T>();
 
-    let publisher_thread = std::thread::spawn(move || {
-        // This thread will run so long as there is a sender alive.
-        // Since common sender keeps an instance of the sender,
-        // the thread runs until common sender is dropped or
-        // set_new_channel is called again.
-        for data in rx {
-            publisher(data);
-        }
-    });
+                let publisher_thread = std::thread::spawn(move || {
+                    let mut publisher = P::new();
+                    // This thread will run so long as there is a sender alive.
+                    // Since common sender keeps an instance of the sender,
+                    // the thread runs until common sender is dropped or
+                    // set_new_channel is called again.
+                    for data in rx {
+                        let _ = publisher.send(data);
+                    }
+                });
 
-    LogPublisherHandle {
-        thread_handle: Some(publisher_thread),
-        common_sender,
-    }
-}
-
-impl<'a, T> Drop for LogPublisherHandle<'a, T> {
-    fn drop(&mut self) {
-        // Close the sender so the publisher thread can exit
-        self.common_sender.close_channel();
-        // Wait for the publisher thread to exit
-        let mut thread_handle: Option<JoinHandle<()>> = None;
-        swap(&mut self.thread_handle, &mut thread_handle);
-        thread_handle.unwrap().join().unwrap();
-    }
-}
-
-pub struct CommonSender<T> {
-    tx: RwLock<Option<Sender<T>>>,
-}
-
-unsafe impl<T> Sync for CommonSender<T> {}
-
-impl<T> CommonSender<T> {
-    pub const fn new() -> CommonSender<T> {
-        CommonSender {
-            tx: RwLock::new(None),
+                RwLock::new(Some(LoggerState {
+                    publisher_handle: Some(publisher_thread),
+                    tx: Some(tx),
+                }))
+            }),
         }
     }
 
     pub fn send(&self, data: T) -> Result<(), ()> {
+        // Must clone the sender to ensure the same sender not used by multiple threads
+        // The clone is dropped, but the original sender must stay alive
+        // to keep the channel open
         let s = self
-            .tx
+            .state
             .read()
             .unwrap()
             .as_ref()
-            .map(|s| s.clone())
+            .map(|state| state.tx.as_ref().unwrap().clone())
             .ok_or(())?;
         s.send(data).map_err(|_| ())
     }
 
-    fn set_new_channel(&self) -> Receiver<T> {
-        let (tx, rx) = channel::<T>();
-
-        // Must clone the sender to ensure the same sender not used by multiple threads
-        // The clone is dropped, but the original sender must stay alive
-        // to keep the channel open
-        let mut old_tx_opt = self.tx.write().unwrap();
-        let _ = std::mem::replace(&mut *old_tx_opt, Some(tx));
-
-        rx
-    }
-
-    fn close_channel(&self) {
-        let mut old_tx_opt = self.tx.write().unwrap();
-        let _ = std::mem::replace(&mut *old_tx_opt, None);
+    pub fn close(&self) {
+        let mut state = self.state.write().unwrap();
+        let mut cleared_state: Option<LoggerState<T>> = None;
+        swap(&mut *state, &mut cleared_state);
     }
 }
+
+pub trait Publisher<T> {
+    fn new() -> Self;
+    fn send(&mut self, data: T) -> Result<(), ()>;
+}
+
+struct LoggerState<T> {
+    // Store state fields as options so they can be safely dropped manually
+    // The thread handle is stored so it can be joined when the logger is dropped
+    publisher_handle: Option<JoinHandle<()>>,
+    tx: Option<Sender<T>>,
+}
+
+impl<T> Drop for LoggerState<T> {
+    fn drop(&mut self) {
+        // Close the sender so the publisher thread can exit
+        {
+            let mut cleared_tx: Option<Sender<T>> = None;
+            swap(&mut self.tx, &mut cleared_tx);
+        }
+        // Wait for the publisher thread to exit
+        let mut thread_handle: Option<JoinHandle<()>> = None;
+        swap(&mut self.publisher_handle, &mut thread_handle);
+        thread_handle.unwrap().join().unwrap();
+    }
+}
+
+unsafe impl<T> Sync for Logger<T> {}
 
 pub struct UnsafeSyncCell<T> {
     pub data: UnsafeCell<T>,
