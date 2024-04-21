@@ -1,5 +1,5 @@
-use crate::bg;
-use bg::UnsafeSyncCell;
+use crate::logger;
+use logger::UnsafeSyncCell;
 
 static BGD: UnsafeSyncCell<String> = UnsafeSyncCell::new(String::new());
 
