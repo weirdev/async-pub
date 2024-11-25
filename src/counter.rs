@@ -3,18 +3,27 @@
 use std::collections::HashMap;
 use std::time;
 
+use serde::{Deserialize, Serialize};
+
 use crate::logger::{Logger, Publisher};
 
 struct CountersStruct(Logger<String>);
-static Counters: CountersStruct = CountersStruct(Logger::new::<CounterPublishState>());
+static COUNTERS: CountersStruct = CountersStruct(Logger::new::<CounterPublishState>());
 
 struct CounterPublishState {
     counters: HashMap<String, CounterState>,
 }
 
+#[derive(Deserialize, Serialize)]
 struct CounterState {
     epoch_minutes: u64,
     count: usize,
+}
+
+#[derive(Deserialize, Serialize)]
+struct CounterMessage {
+    counter: String,
+    state: Vec<CounterState>,
 }
 
 impl CounterPublishState {
@@ -24,13 +33,22 @@ impl CounterPublishState {
         prev_counter_state: Option<CounterState>,
         cur_counter_state: CounterState,
     ) {
+        let mut state = Vec::with_capacity(2);
         if let Some(prev_cs) = prev_counter_state {
-            println!("{}: [{}] {}", counter, prev_cs.epoch_minutes, prev_cs.count);
+            state.push(prev_cs);
         }
-        println!(
-            "{}: [{}] {}",
-            counter, cur_counter_state.epoch_minutes, cur_counter_state.count
-        );
+        state.push(cur_counter_state);
+        let message = CounterMessage { counter, state };
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(
+                reqwest::Client::new()
+                    .post("http://localhost:8080/counter")
+                    .body(serde_json::to_string(&message).unwrap())
+                    .send(),
+            )
+            .unwrap();
     }
 }
 
@@ -101,6 +119,6 @@ impl Drop for CounterPublishState {
     }
 }
 
-pub fn incCounter(counter: String) {
-    Counters.0.send(counter).unwrap();
+pub fn inc_counter(counter: String) {
+    COUNTERS.0.send(counter).unwrap();
 }

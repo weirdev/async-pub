@@ -2,7 +2,7 @@ use std::{thread, time};
 
 use rand::{rngs::ThreadRng, Rng};
 
-use crate::counter::incCounter;
+use crate::counter::inc_counter;
 
 fn sleep_random_millis(rng: &mut ThreadRng) {
     let millis = rng.gen_range(0..72000); // Generates a number between 0 and 20
@@ -15,9 +15,9 @@ pub fn main() {
         thread::spawn(move || {
             let mut rng = rand::thread_rng();
             sleep_random_millis(&mut rng);
-            incCounter("did_a_thing".to_string());
+            inc_counter("did_a_thing".to_string());
             if i % 10 == 0 {
-                incCounter(format!("did_a_new_thing_{}", i));
+                inc_counter(format!("did_a_new_thing_{}", i));
             }
         });
     }
