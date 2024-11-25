@@ -12,6 +12,6 @@ The publisher runs on a background thread so logger.send() calls return almost i
 - Counter clearing, time bucketing, etc.
 - Connection to remote
 - Remote receiver
-- Counter publish on shutdown
+- Counter drop / publish on shutdown
 - Ligher weight string repr: for communication? for local calls?
 - Multi increment counters
