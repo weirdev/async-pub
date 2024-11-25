@@ -7,3 +7,11 @@ Simply create a type implementing Publisher that processes updates in sequence. 
 The logger type is intended to be static initialized so as to be globally available and shared across the program.
 
 The publisher runs on a background thread so logger.send() calls return almost immediately.
+
+## TODO
+- Counter clearing, time bucketing, etc.
+- Connection to remote
+- Remote receiver
+- Counter publish on shutdown
+- Ligher weight string repr: for communication? for local calls?
+- Multi increment counters
