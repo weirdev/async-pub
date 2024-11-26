@@ -40,6 +40,8 @@ impl CounterPublishState {
         state.push(cur_counter_state);
         let message = CounterMessage { counter, state };
         tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .enable_io()
             .build()
             .unwrap()
             .block_on(
