@@ -2,7 +2,7 @@ use std::{thread, time};
 
 use rand::{rngs::ThreadRng, Rng};
 
-use crate::counter::inc_counter;
+use crate::{counter::inc_counter, counter_server};
 
 fn sleep_random_millis(rng: &mut ThreadRng) {
     let millis = rng.gen_range(0..72000); // Generates a number between 0 and 20
@@ -11,6 +11,12 @@ fn sleep_random_millis(rng: &mut ThreadRng) {
 }
 
 pub fn main() {
+    thread::spawn(move || {
+        counter_server::run_server().unwrap();
+    });
+    // Give the server time to start
+    thread::sleep(time::Duration::from_millis(100));
+
     for i in 0..330 {
         thread::spawn(move || {
             let mut rng = rand::thread_rng();

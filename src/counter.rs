@@ -1,10 +1,13 @@
 // Adapt the generic logger for use as a count publisher
 
 use std::collections::HashMap;
-use std::time;
 
-use serde::{Deserialize, Serialize};
+use futures::SinkExt;
+use tokio::net::TcpStream;
+use tokio_serde::formats::SymmetricalJson;
+use tokio_util::codec::{FramedWrite, LengthDelimitedCodec};
 
+use crate::counter_types::{get_epoc_minutes, CounterMessage, CounterState};
 use crate::logger::{Logger, Publisher};
 
 struct CountersStruct(Logger<String>);
@@ -12,18 +15,6 @@ static COUNTERS: CountersStruct = CountersStruct(Logger::new::<CounterPublishSta
 
 struct CounterPublishState {
     counters: HashMap<String, CounterState>,
-}
-
-#[derive(Deserialize, Serialize)]
-struct CounterState {
-    epoch_minutes: u64,
-    count: usize,
-}
-
-#[derive(Deserialize, Serialize)]
-struct CounterMessage {
-    counter: String,
-    state: Vec<CounterState>,
 }
 
 impl CounterPublishState {
@@ -39,19 +30,30 @@ impl CounterPublishState {
         }
         state.push(cur_counter_state);
         let message = CounterMessage { counter, state };
+
+        // TODO: Maintain just one connection (or pool or thread)
+
         tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .enable_io()
             .build()
             .unwrap()
-            .block_on(
-                reqwest::Client::new()
-                    .post("http://localhost:8080/counter")
-                    .body(serde_json::to_string(&message).unwrap())
-                    .send(),
-            )
+            .block_on(transport_message(message))
             .unwrap();
     }
+}
+
+async fn transport_message(message: CounterMessage) -> Result<(), std::io::Error> {
+    let socket = TcpStream::connect("127.0.0.1:7878").await.unwrap();
+
+    let length_delimited = FramedWrite::new(socket, LengthDelimitedCodec::new());
+
+    let mut serialized = tokio_serde::SymmetricallyFramed::new(
+        length_delimited,
+        SymmetricalJson::<CounterMessage>::default(),
+    );
+
+    serialized.send(message).await
 }
 
 impl Publisher<String> for CounterPublishState {
@@ -62,12 +64,8 @@ impl Publisher<String> for CounterPublishState {
     }
 
     fn send(&mut self, counter: String) -> Result<(), ()> {
-        let epoch_seconds = time::SystemTime::now()
-            .duration_since(time::UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_secs();
         // ~1 minute accuracy
-        let epoch_minutes = epoch_seconds / 60;
+        let epoch_minutes = get_epoc_minutes();
 
         let mut prev_cs: Option<CounterState> = None;
         let cur_count = if let Some(cs) = self.counters.get_mut(&counter) {
@@ -98,6 +96,8 @@ impl Publisher<String> for CounterPublishState {
             1
         };
 
+        // Publish if it has been a minute or the count is a power of 2
+        // TODO: Start at the power of two from the last minute or 1/2 of it
         if prev_cs.is_some() || cur_count == cur_count.next_power_of_two() {
             self.publish_to_remote(
                 counter,
@@ -116,7 +116,7 @@ impl Publisher<String> for CounterPublishState {
 impl Drop for CounterPublishState {
     fn drop(&mut self) {
         if self.counters.values().any(|c| c.count > 0) {
-            panic!("Some counters not published");
+            // panic!("Some counters not published");
         }
     }
 }

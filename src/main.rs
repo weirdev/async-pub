@@ -1,5 +1,7 @@
 mod logger;
 mod counter;
+mod counter_server;
+mod counter_types;
 
 mod test1;
 mod test2;
