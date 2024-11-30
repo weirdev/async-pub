@@ -9,7 +9,7 @@ use tokio::net::TcpListener;
 use tokio_serde::formats::*;
 use tokio_util::codec::{FramedRead, LengthDelimitedCodec};
 
-use crate::counter_types::{get_epoc_minutes, CounterUpdateMessage, CounterState};
+use crate::counter_types::{get_epoc_minutes, CounterMessage, CounterState, CounterUpdateMessage};
 
 struct TimeBucketSpec {
     interval_minutes: u64,
@@ -84,7 +84,7 @@ pub async fn run_server() -> std::io::Result<()> {
             // Deserialize frames
             let mut deserialized = tokio_serde::SymmetricallyFramed::new(
                 length_delimited,
-                SymmetricalJson::<CounterUpdateMessage>::default(),
+                SymmetricalJson::<CounterMessage>::default(),
             );
 
             // We could process each message on its own thread, but that is probably not efficient
@@ -92,31 +92,49 @@ pub async fn run_server() -> std::io::Result<()> {
                 // Must get the time after the message is received
                 let server_epoch_minutes = get_epoc_minutes();
 
-                msg.state.iter().for_each(|counter_state| {
-                    println!(
-                        "{} [{}]: {}",
-                        msg.counter, counter_state.epoch_minutes, counter_state.count
-                    );
-                });
-
-                // Get the time series for the counter, creating it if it doesn't exist
-                let time_series =
-                    if let Some(time_series) = counters.read().unwrap().get(&msg.counter) {
-                        time_series.clone()
-                    } else {
-                        let time_series = Arc::new(Mutex::new(create_time_series()));
-                        counters
-                            .write()
-                            .unwrap()
-                            .insert(msg.counter.clone(), time_series.clone());
-                        time_series
-                    };
-
-                update_time_series(
-                    &mut *time_series.lock().unwrap(),
-                    msg.state,
-                    server_epoch_minutes,
-                );
+                match msg {
+                    CounterMessage::Read(counter) => {
+                        let time_series = counters.read().unwrap();
+                        if let Some(time_series) = time_series.get(&counter) {
+                            let time_series = time_series.lock().unwrap();
+                            time_series.iter().flat_map(|bucket| bucket.data.iter()).for_each(
+                                |counter_state| {
+                                    println!(
+                                        "{} [{}]: {}",
+                                        counter, counter_state.epoch_minutes, counter_state.count
+                                    );
+                                },
+                            );
+                        }
+                    }
+                    CounterMessage::Update(msg) => {
+                        msg.state.iter().for_each(|counter_state| {
+                            println!(
+                                "{} [{}]: {}",
+                                msg.counter, counter_state.epoch_minutes, counter_state.count
+                            );
+                        });
+        
+                        // Get the time series for the counter, creating it if it doesn't exist
+                        let time_series =
+                            if let Some(time_series) = counters.read().unwrap().get(&msg.counter) {
+                                time_series.clone()
+                            } else {
+                                let time_series = Arc::new(Mutex::new(create_time_series()));
+                                counters
+                                    .write()
+                                    .unwrap()
+                                    .insert(msg.counter.clone(), time_series.clone());
+                                time_series
+                            };
+        
+                        update_time_series(
+                            &mut *time_series.lock().unwrap(),
+                            msg.state,
+                            server_epoch_minutes,
+                        );
+                    }
+                }
             }
         });
     }

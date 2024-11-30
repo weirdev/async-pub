@@ -12,8 +12,8 @@ The publisher runs on a background thread so logger.send() calls return almost i
 - Avoid taking exclusive lock coving all counters when adding a new counter
   - Use a tree with locks at each node?
 - Connection to remote
-- Remote receiver
 - Counter drop / publish on shutdown
 - Ligher weight string repr: for communication? for local calls?
 - Multi increment counters
-- Perf: don't shift on every increment
+- Perf: Don't shift on every increment
+- Perf: Keep socket open across calls

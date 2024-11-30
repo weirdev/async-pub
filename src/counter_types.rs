@@ -14,6 +14,12 @@ pub struct CounterUpdateMessage {
     pub state: Vec<CounterState>,
 }
 
+#[derive(Deserialize, Serialize)]
+pub enum CounterMessage {
+    Read(String),
+    Update(CounterUpdateMessage),
+}
+
 pub fn get_epoc_minutes() -> u64 {
     let epoch_seconds = time::SystemTime::now()
         .duration_since(time::UNIX_EPOCH)
