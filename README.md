@@ -9,6 +9,7 @@ The logger type is intended to be static initialized so as to be globally availa
 The publisher runs on a background thread so logger.send() calls return almost immediately.
 
 ## TODO
+- Fix issue wait waiting on the same socket in server and client
 - Avoid taking exclusive lock coving all counters when adding a new counter
   - Use a tree with locks at each node?
 - Connection to remote
@@ -17,3 +18,4 @@ The publisher runs on a background thread so logger.send() calls return almost i
 - Multi increment counters
 - Perf: Don't shift on every increment
 - Perf: Keep socket open across calls
+- Perf: Construct tokio runtime only once

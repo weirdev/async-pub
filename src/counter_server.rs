@@ -6,10 +6,10 @@ use std::{
 
 use futures::prelude::*;
 use tokio::net::TcpListener;
-use tokio_serde::formats::*;
-use tokio_util::codec::{FramedRead, LengthDelimitedCodec};
+use tokio_serde::formats::Json;
+use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
-use crate::counter_types::{get_epoc_minutes, CounterMessage, CounterState, CounterUpdateMessage};
+use crate::counter_types::{get_epoc_minutes, CounterMessage, CounterState};
 
 struct TimeBucketSpec {
     interval_minutes: u64,
@@ -77,35 +77,51 @@ pub async fn run_server() -> std::io::Result<()> {
 
         // For each client, spawn a new task
         tokio::spawn(async move {
-            let (reader, mut _writer) = socket.split();
+            // let (reader, mut _writer) = socket.split();
 
-            let length_delimited = FramedRead::new(reader, LengthDelimitedCodec::new());
+            let length_delimited = Framed::new(socket, LengthDelimitedCodec::new());
 
             // Deserialize frames
-            let mut deserialized = tokio_serde::SymmetricallyFramed::new(
+            let mut typed_socket: tokio_serde::Framed<
+                Framed<tokio::net::TcpStream, LengthDelimitedCodec>,
+                CounterMessage,
+                CounterState,
+                Json<CounterMessage, CounterState>,
+            > = tokio_serde::Framed::new(
                 length_delimited,
-                SymmetricalJson::<CounterMessage>::default(),
+                Json::<CounterMessage, CounterState>::default(),
             );
 
             // We could process each message on its own thread, but that is probably not efficient
-            while let Some(msg) = deserialized.try_next().await.unwrap() {
+            while let Some(msg) = typed_socket.try_next().await.unwrap() {
                 // Must get the time after the message is received
                 let server_epoch_minutes = get_epoc_minutes();
 
                 match msg {
                     CounterMessage::Read(counter) => {
-                        let time_series = counters.read().unwrap();
-                        if let Some(time_series) = time_series.get(&counter) {
-                            let time_series = time_series.lock().unwrap();
-                            time_series.iter().flat_map(|bucket| bucket.data.iter()).for_each(
-                                |counter_state| {
-                                    println!(
-                                        "{} [{}]: {}",
-                                        counter, counter_state.epoch_minutes, counter_state.count
-                                    );
-                                },
-                            );
-                        }
+                        let counter_state = {
+                            // Put this in a block to release the lock before sending the message
+                            let time_series = counters.read().unwrap();
+                            if let Some(time_series) = time_series.get(&counter) {
+                                let time_series = time_series.lock().unwrap();
+                                let count: usize = time_series
+                                    .iter()
+                                    .flat_map(|bucket| bucket.data.iter())
+                                    .map(|interval| interval.count)
+                                    .sum();
+
+                                CounterState {
+                                    epoch_minutes: server_epoch_minutes,
+                                    count,
+                                }
+                            } else {
+                                CounterState {
+                                    epoch_minutes: server_epoch_minutes,
+                                    count: 0,
+                                }
+                            }
+                        };
+                        typed_socket.send(counter_state).await.unwrap();
                     }
                     CounterMessage::Update(msg) => {
                         msg.state.iter().for_each(|counter_state| {
@@ -114,7 +130,7 @@ pub async fn run_server() -> std::io::Result<()> {
                                 msg.counter, counter_state.epoch_minutes, counter_state.count
                             );
                         });
-        
+
                         // Get the time series for the counter, creating it if it doesn't exist
                         let time_series =
                             if let Some(time_series) = counters.read().unwrap().get(&msg.counter) {
@@ -127,7 +143,7 @@ pub async fn run_server() -> std::io::Result<()> {
                                     .insert(msg.counter.clone(), time_series.clone());
                                 time_series
                             };
-        
+
                         update_time_series(
                             &mut *time_series.lock().unwrap(),
                             msg.state,
@@ -613,7 +629,10 @@ mod tests {
 
         assert_eq!(series[0].data.len(), 1);
         assert_eq!(series[1].data.len(), 1);
-        assert_eq!(series[2..].iter().all(|bucket| bucket.data.is_empty()), true);
+        assert_eq!(
+            series[2..].iter().all(|bucket| bucket.data.is_empty()),
+            true
+        );
 
         let pre_shift = series.clone();
 
@@ -628,6 +647,9 @@ mod tests {
         assert_eq!(series[2].data.len(), 1);
         assert_eq!(series[2].data[0].epoch_minutes, 0);
         assert_eq!(series[2].data[0].count, 2);
-        assert_eq!(series[3..].iter().all(|bucket| bucket.data.is_empty()), true);
+        assert_eq!(
+            series[3..].iter().all(|bucket| bucket.data.is_empty()),
+            true
+        );
     }
 }

@@ -1,11 +1,12 @@
 // Adapt the generic logger for use as a count publisher
 
 use std::collections::HashMap;
+use std::thread;
 
-use futures::SinkExt;
+use futures::prelude::*;
 use tokio::net::TcpStream;
-use tokio_serde::formats::SymmetricalJson;
-use tokio_util::codec::{FramedWrite, LengthDelimitedCodec};
+use tokio_serde::formats::Json;
+use tokio_util::codec::{Framed, FramedWrite, LengthDelimitedCodec};
 
 use crate::counter_types::{get_epoc_minutes, CounterMessage, CounterState, CounterUpdateMessage};
 use crate::logger::{Logger, Publisher};
@@ -43,17 +44,48 @@ impl CounterPublishState {
     }
 }
 
-async fn transport_message(message: CounterMessage) -> Result<(), std::io::Error> {
+pub async fn get_count_async(counter: String) -> usize {
+    // TODO: Super hacky, register the read before we send the request
+    let receive = receive_message();
+
+    transport_message(CounterMessage::Read(counter))
+        .await
+        .unwrap();
+    receive.await.unwrap().count
+}
+
+async fn get_typed_socket() -> tokio_serde::Framed<
+    Framed<TcpStream, LengthDelimitedCodec>,
+    CounterState,
+    CounterMessage,
+    Json<CounterState, CounterMessage>,
+> {
     let socket = TcpStream::connect("127.0.0.1:7878").await.unwrap();
 
-    let length_delimited = FramedWrite::new(socket, LengthDelimitedCodec::new());
+    let length_delimited = Framed::new(socket, LengthDelimitedCodec::new());
 
-    let mut serialized = tokio_serde::SymmetricallyFramed::new(
+    tokio_serde::Framed::new(
         length_delimited,
-        SymmetricalJson::<CounterMessage>::default(),
-    );
+        Json::<CounterState, CounterMessage>::default(),
+    )
+}
 
-    serialized.send(message).await
+async fn transport_message(message: CounterMessage) -> Result<(), std::io::Error> {
+    let mut typed_socket = get_typed_socket().await;
+
+    typed_socket.send(message).await
+}
+
+async fn receive_message() -> Result<CounterState, std::io::Error> {
+    let mut typed_socket = get_typed_socket().await;
+
+    match typed_socket.try_next().await? {
+        Some(counter_state) => Ok(counter_state),
+        None => Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "No message received",
+        )),
+    }
 }
 
 impl Publisher<String> for CounterPublishState {
@@ -123,4 +155,13 @@ impl Drop for CounterPublishState {
 
 pub fn inc_counter(counter: String) {
     COUNTERS.0.send(counter).unwrap();
+}
+
+pub fn get_count(counter: String) -> usize {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .enable_io()
+        .build()
+        .unwrap()
+        .block_on(get_count_async(counter))
 }
