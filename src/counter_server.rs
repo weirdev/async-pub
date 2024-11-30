@@ -17,7 +17,7 @@ struct TimeBucketSpec {
 }
 
 const TIME_BUCKET_COUNT: usize = 5;
-// Newest to oldest
+/// Newest to oldest
 type TimeSeries = [TimeBucket; TIME_BUCKET_COUNT];
 const TIME_BUCKET_SPECS: [TimeBucketSpec; TIME_BUCKET_COUNT] = [
     // 6 hours of 1 minute resolution
@@ -52,8 +52,11 @@ const TIME_BUCKET_SPECS: [TimeBucketSpec; TIME_BUCKET_COUNT] = [
     },
 ];
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct TimeBucket {
+    /// Minutes per interval
     interval_minutes: u64,
+    /// This bucket holds [previous cutoff_minutes, cutoff_minutes) minutes of data
     cutoff_minutes: u64,
     /// Oldest to newest
     data: VecDeque<CounterState>,
@@ -138,10 +141,11 @@ fn update_time_series(
 /// Update the existing time series buckets, so that none hold data past thier cutoff
 fn shift_time_series(time_series: &mut TimeSeries, server_epoch_minutes: u64) {
     for i in (0..time_series.len()).rev() {
+        // Oldest to earliest bucket
         let (younger, older) = time_series.split_at_mut(i + 1);
         let bucket = younger.last_mut().unwrap();
-        // Oldest to earliest bucket
-        while bucket.data.back_mut().map_or(false, |last_state| {
+        // Look at the oldest interval
+        while bucket.data.front_mut().map_or(false, |last_state| {
             bucket.cutoff_minutes < server_epoch_minutes - last_state.epoch_minutes
         }) {
             let graduated_state = bucket.data.pop_back().unwrap();
@@ -188,8 +192,7 @@ fn add_to_bucket(
         if counter_state.epoch_minutes < interval_state.epoch_minutes {
             // New state comes before the current interval
             // Give the new counter state an aligned minute value
-            counter_state.epoch_minutes = counter_state.epoch_minutes
-                - (counter_state.epoch_minutes % bucket.interval_minutes);
+            counter_state.epoch_minutes -= counter_state.epoch_minutes % bucket.interval_minutes;
             if i == bucket.data.len() - 1 {
                 // The new state will be the newest in the bucket
                 bucket.data.push_back(counter_state);
@@ -206,6 +209,7 @@ fn add_to_bucket(
             return;
         }
     }
+    counter_state.epoch_minutes -= counter_state.epoch_minutes % bucket.interval_minutes;
     // The new state will be the oldest in the bucket
     bucket.data.push_front(counter_state);
 }
@@ -341,7 +345,8 @@ mod tests {
         add_to_bucket(&mut bucket, counter_state, 1);
 
         assert_eq!(bucket.data.len(), 1);
-        assert_eq!(bucket.data[0].epoch_minutes, 1);
+        // 1 min in the 3 min bucket goes into the 0-2 min interval
+        assert_eq!(bucket.data[0].epoch_minutes, 0);
         assert_eq!(bucket.data[0].count, 1);
 
         let counter_state = CounterState {
@@ -352,9 +357,9 @@ mod tests {
         add_to_bucket(&mut bucket, counter_state, 4);
 
         assert_eq!(bucket.data.len(), 2);
-        assert_eq!(bucket.data[0].epoch_minutes, 4);
+        assert_eq!(bucket.data[0].epoch_minutes, 3);
         assert_eq!(bucket.data[0].count, 1);
-        assert_eq!(bucket.data[1].epoch_minutes, 1);
+        assert_eq!(bucket.data[1].epoch_minutes, 0);
         assert_eq!(bucket.data[1].count, 1);
 
         let counter_state = CounterState {
@@ -365,9 +370,9 @@ mod tests {
         add_to_bucket(&mut bucket, counter_state, 4);
 
         assert_eq!(bucket.data.len(), 2);
-        assert_eq!(bucket.data[0].epoch_minutes, 4);
+        assert_eq!(bucket.data[0].epoch_minutes, 3);
         assert_eq!(bucket.data[0].count, 1);
-        assert_eq!(bucket.data[1].epoch_minutes, 1);
+        assert_eq!(bucket.data[1].epoch_minutes, 0);
         assert_eq!(bucket.data[1].count, 2);
 
         let counter_state = CounterState {
@@ -378,9 +383,9 @@ mod tests {
         add_to_bucket(&mut bucket, counter_state, 5);
 
         assert_eq!(bucket.data.len(), 2);
-        assert_eq!(bucket.data[0].epoch_minutes, 4);
+        assert_eq!(bucket.data[0].epoch_minutes, 3);
         assert_eq!(bucket.data[0].count, 8);
-        assert_eq!(bucket.data[1].epoch_minutes, 1);
+        assert_eq!(bucket.data[1].epoch_minutes, 0);
         assert_eq!(bucket.data[1].count, 2);
     }
 
@@ -487,5 +492,124 @@ mod tests {
         assert_eq!(series[1].data[0].epoch_minutes, 0);
         assert_eq!(series[1].data[0].count, 5);
         assert!(series[2..].iter().all(|bucket| bucket.data.is_empty()));
+    }
+
+    #[test]
+    fn add_to_standard_series_past_final_cutoff() {
+        let mut series = create_time_series();
+        let start_point = series[TIME_BUCKET_COUNT - 1].cutoff_minutes + 100;
+        let counter_state = CounterState {
+            epoch_minutes: 10,
+            count: 1,
+        };
+
+        add_to_series(&mut series, counter_state, start_point);
+
+        assert!(series.iter().all(|bucket| bucket.data.is_empty()));
+    }
+
+    #[test]
+    fn shift_time_series_no_shift() {
+        const START_POINT: u64 = 18 * 60;
+
+        let mut series = create_time_series();
+        let counter_state = CounterState {
+            epoch_minutes: 10,
+            count: 2,
+        };
+
+        add_to_series(&mut series, counter_state, START_POINT);
+
+        let counter_state = CounterState {
+            epoch_minutes: 11,
+            count: 3,
+        };
+
+        add_to_series(&mut series, counter_state, START_POINT + 1);
+
+        let pre_shift = series.clone();
+
+        shift_time_series(&mut series, START_POINT);
+
+        assert_eq!(series, pre_shift);
+    }
+
+    #[test]
+    fn shift_time_series_shift_multiple_to_one() {
+        const START_POINT: u64 = 18 * 60;
+
+        let mut series = create_time_series();
+        let counter_state = CounterState {
+            epoch_minutes: 10,
+            count: 2,
+        };
+
+        add_to_series(&mut series, counter_state, START_POINT);
+
+        let counter_state = CounterState {
+            epoch_minutes: 11,
+            count: 3,
+        };
+
+        add_to_series(&mut series, counter_state, START_POINT + 1);
+
+        assert_eq!(series[0].data.len(), 0);
+        assert_eq!(series[1].data.len(), 1);
+        assert_eq!(
+            series[2..].iter().all(|bucket| bucket.data.is_empty()),
+            true
+        );
+
+        let pre_shift = series.clone();
+
+        // One day later
+        shift_time_series(&mut series, START_POINT + (60 * 24));
+
+        assert_ne!(series, pre_shift);
+        assert_eq!(series[0].data.len(), 0);
+        assert_eq!(series[1].data.len(), 0);
+        assert_eq!(series[2].data.len(), 1);
+        assert_eq!(series[2].data[0].epoch_minutes, 0);
+        assert_eq!(series[2].data[0].count, 5);
+        assert!(series[3..].iter().all(|bucket| bucket.data.is_empty()));
+    }
+
+    #[test]
+    fn shift_time_series_shift_multiple_to_multiple() {
+        const START_POINT: u64 = 18 * 60;
+
+        let mut series = create_time_series();
+        let counter_state = CounterState {
+            epoch_minutes: 10,
+            count: 2,
+        };
+
+        add_to_series(&mut series, counter_state, START_POINT);
+
+        let counter_state = CounterState {
+            epoch_minutes: START_POINT - 10,
+            count: 3,
+        };
+
+        add_to_series(&mut series, counter_state, START_POINT);
+
+        assert_eq!(series[0].data.len(), 1);
+        assert_eq!(series[1].data.len(), 1);
+        assert_eq!(series[2..].iter().all(|bucket| bucket.data.is_empty()), true);
+
+        let pre_shift = series.clone();
+
+        // 18 hours later
+        shift_time_series(&mut series, START_POINT + (60 * 18));
+
+        assert_ne!(series, pre_shift);
+        assert_eq!(series[0].data.len(), 0);
+        assert_eq!(series[1].data.len(), 1);
+        assert_eq!(series[1].data[0].epoch_minutes, 1070);
+        assert_eq!(series[1].data[0].count, 3);
+        assert_eq!(series[2].data.len(), 1);
+        assert_eq!(series[2].data[0].epoch_minutes, 0);
+        assert_eq!(series[2].data[0].count, 2);
+        assert_eq!(series[3..].iter().all(|bucket| bucket.data.is_empty()), true);
     }
 }
