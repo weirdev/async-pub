@@ -9,7 +9,7 @@ pub struct CounterState {
 }
 
 #[derive(Deserialize, Serialize)]
-pub struct CounterMessage {
+pub struct CounterUpdateMessage {
     pub counter: String,
     pub state: Vec<CounterState>,
 }

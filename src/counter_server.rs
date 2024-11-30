@@ -9,7 +9,7 @@ use tokio::net::TcpListener;
 use tokio_serde::formats::*;
 use tokio_util::codec::{FramedRead, LengthDelimitedCodec};
 
-use crate::counter_types::{get_epoc_minutes, CounterMessage, CounterState};
+use crate::counter_types::{get_epoc_minutes, CounterUpdateMessage, CounterState};
 
 struct TimeBucketSpec {
     interval_minutes: u64,
@@ -84,7 +84,7 @@ pub async fn run_server() -> std::io::Result<()> {
             // Deserialize frames
             let mut deserialized = tokio_serde::SymmetricallyFramed::new(
                 length_delimited,
-                SymmetricalJson::<CounterMessage>::default(),
+                SymmetricalJson::<CounterUpdateMessage>::default(),
             );
 
             // We could process each message on its own thread, but that is probably not efficient

@@ -7,7 +7,7 @@ use tokio::net::TcpStream;
 use tokio_serde::formats::SymmetricalJson;
 use tokio_util::codec::{FramedWrite, LengthDelimitedCodec};
 
-use crate::counter_types::{get_epoc_minutes, CounterMessage, CounterState};
+use crate::counter_types::{get_epoc_minutes, CounterUpdateMessage, CounterState};
 use crate::logger::{Logger, Publisher};
 
 struct CountersStruct(Logger<String>);
@@ -29,7 +29,7 @@ impl CounterPublishState {
             state.push(prev_cs);
         }
         state.push(cur_counter_state);
-        let message = CounterMessage { counter, state };
+        let message = CounterUpdateMessage { counter, state };
 
         // TODO: Maintain just one connection (or pool or thread)
 
@@ -43,14 +43,14 @@ impl CounterPublishState {
     }
 }
 
-async fn transport_message(message: CounterMessage) -> Result<(), std::io::Error> {
+async fn transport_message(message: CounterUpdateMessage) -> Result<(), std::io::Error> {
     let socket = TcpStream::connect("127.0.0.1:7878").await.unwrap();
 
     let length_delimited = FramedWrite::new(socket, LengthDelimitedCodec::new());
 
     let mut serialized = tokio_serde::SymmetricallyFramed::new(
         length_delimited,
-        SymmetricalJson::<CounterMessage>::default(),
+        SymmetricalJson::<CounterUpdateMessage>::default(),
     );
 
     serialized.send(message).await
