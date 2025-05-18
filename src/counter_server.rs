@@ -1,4 +1,4 @@
-use core::panic;
+use core::{panic, time};
 use std::{
     collections::{HashMap, VecDeque},
     sync::{Arc, Mutex, RwLock},
@@ -116,18 +116,22 @@ pub async fn run_server() -> std::io::Result<()> {
                         });
         
                         // Get the time series for the counter, creating it if it doesn't exist
-                        let time_series =
-                            if let Some(time_series) = counters.read().unwrap().get(&msg.counter) {
-                                time_series.clone()
-                            } else {
-                                let time_series = Arc::new(Mutex::new(create_time_series()));
-                                counters
-                                    .write()
-                                    .unwrap()
-                                    .insert(msg.counter.clone(), time_series.clone());
-                                time_series
-                            };
-        
+                        // NOTE: Not using a more natural if let else here because the read lock is held through the else block
+                        let time_series = counters
+                            .read()
+                            .unwrap()
+                            .get(&msg.counter)
+                            .map(|ts| ts.clone());
+
+                        let time_series = time_series.unwrap_or_else(|| {
+                            let time_series = Arc::new(Mutex::new(create_time_series()));
+                            counters
+                                .write()
+                                .unwrap()
+                                .insert(msg.counter.clone(), time_series.clone());
+                            time_series
+                        });
+
                         update_time_series(
                             &mut *time_series.lock().unwrap(),
                             msg.state,
