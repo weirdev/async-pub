@@ -17,3 +17,6 @@ The publisher runs on a background thread so logger.send() calls return almost i
 - Multi increment counters
 - Perf: Don't shift on every increment
 - Perf: Keep socket open across calls
+
+# Current status
+fix-recieve-enum branch contains lots of improvements of async usage and intialization that are not on master
